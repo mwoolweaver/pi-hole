@@ -262,6 +262,11 @@ package_manager_detect() {
         # The command we will use to remove packages (used in the uninstaller)
         PKG_REMOVE="${PKG_MANAGER} -y remove --purge"
 
+        # pihole-meta package check
+        PKG_META_CHECK=$(dpkg -s pihole-meta 2> /dev/null | grep -c 'Architecture' || true)
+        PKG_INSTALLED=$(dpkg -s pihole-meta 2> /dev/null | grep -oP 'Version\s*:\s*\K.*' || true)
+        PKG_TO_BE_INSTALLED=$(echo "${PIHOLE_META_PACKAGE_CONTROL_APT}" | grep -oP 'Version\s*:\s*\K.*')
+
     # If apt-get is not found, check for rpm.
     elif is_command rpm; then
         # Then check if dnf or yum is the package manager
@@ -277,6 +282,11 @@ package_manager_detect() {
         PKG_COUNT="${PKG_MANAGER} check-update | grep -E '(.i686|.x86|.noarch|.arm|.src|.riscv64)' | wc -l || true"
         # The command we will use to remove packages (used in the uninstaller)
         PKG_REMOVE="${PKG_MANAGER} remove -y"
+
+        # pihole-meta package check
+        PKG_META_CHECK=$(rpm -q pihole-meta | grep -c 'noarch' || true)
+        PKG_INSTALLED=$(rpm -qi pihole-meta | grep -oP 'Version\s*:\s*\K.*' || true)
+        PKG_TO_BE_INSTALLED=$(echo "${PIHOLE_META_PACKAGE_CONTROL_RPM}" | grep -oP 'Version\s*:\s*\K.*')
     # If neither apt-get or yum/dnf package managers were found
     else
         # we cannot install required packages
@@ -389,55 +399,30 @@ check_for_meta_package(){
     local str="Checking for Pi-hole dependency package"
     printf "  %b %s..." "${INFO}" "${str}"
 
-    if is_command apt-get; then
-        # Debian/Ubuntu check for pihole-meta package
-        if [[ $(dpkg -s pihole-meta 2> /dev/null) ]]; then
-            # we can check $META_PACKAGE_CHECK to know if we are coming from update.sh
-            # and can exit early as the meta package hasn't change yet
-            if [[ "${META_PACKAGE_CHECK}" == true ]]; then
-                printf " found.\n"
-                return 0
-            fi
-
-            installed_version=$(dpkg -s pihole-meta 2> /dev/null | grep -oP 'Version\s*:\s*\K.*')
-            version_to_be_installed=$(echo "${PIHOLE_META_PACKAGE_CONTROL_APT}" | grep -oP 'Version\s*:\s*\K.*')
-        else
-            # install the pihole-meta package as it is likely a fresh install or removed inadvertently by user
-            printf " not installed.\n"
-            return 1
+    # check for pihole-meta package
+    if [[  "${PKG_META_CHECK}" -eq 1 ]]; then
+        # we can check $META_PACKAGE_CHECK to know if we are coming from update.sh
+        # and can exit early as the meta package hasn't change yet
+        if [[ "${META_PACKAGE_CHECK}" == true ]]; then
+            printf " found.\n"
+            echo "${PKG_INSTALLED}  --  ${PKG_TO_BE_INSTALLED} -- found"
+            return 0
         fi
 
-    elif is_command rpm; then
-        # Fedora/CentOS check for pihole-meta package
-        if [[ $(rpm -q pihole-meta 2>/dev/null) ]]; then
-
-            if [[ "${META_PACKAGE_CHECK}" == true ]]; then
-                printf " found.\n"
-                return 0
-            fi
-
-            installed_version=$(rpm -qi pihole-meta | grep -oP 'Version\s*:\s*\K.*')
-            version_to_be_installed=$(echo "${PIHOLE_META_PACKAGE_CONTROL_RPM}" | grep -oP 'Version\s*:\s*\K.*')
-        else
-            # install the pihole-meta package as it is likely a fresh install or removed inadvertently by user
-            printf " not installed."
-            return 1
-        fi
-
-    # If neither apt-get or yum/dnf package managers were found
     else
-        # we cannot install the dependency package
-        printf "  %b No supported package manager found.\\n" "${CROSS}"
-        # so exit the installer
-        exit 1
+        # install the pihole-meta package as it is likely a fresh install or removed inadvertently by user
+        printf " not installed.\n"
+        echo "${PKG_INSTALLED}  --  ${PKG_TO_BE_INSTALLED}"
+        return 1
     fi
 
     local installed_version_number version_number_to_be_installed
 
     # convert version number so it is easier to compare
-    installed_version_number="$(VersionConverter "${installed_version}")"
-    version_number_to_be_installed="$(VersionConverter "${version_to_be_installed}")"
-
+    installed_version_number="$(VersionConverter "${PKG_INSTALLED}")"
+    version_number_to_be_installed="$(VersionConverter "${PKG_TO_BE_INSTALLED}")"
+    echo "${installed_version_number}  --  ${version_number_to_be_installed} -- found"
+    
     # If we make it here, pihole-meta package is installed so we should check to make
     # sure we aren't installing the same version again needlessly during an update
     if [[ version_number_to_be_installed -eq installed_version_number ]]; then
